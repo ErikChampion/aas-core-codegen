@@ -14,6 +14,15 @@ import aas_core_codegen.opcua.naming as opcua_naming
 
 assert aas_core_codegen.opcua.__doc__ == __doc__
 
+_PRIMITIVE_MAP = {
+    intermediate.PrimitiveType.BOOL: "Boolean",
+    intermediate.PrimitiveType.INT: "Int64",
+    intermediate.PrimitiveType.FLOAT: "Double",
+    intermediate.PrimitiveType.STR: "String",
+    intermediate.PrimitiveType.BYTEARRAY: "ByteString",
+}
+assert all(literal in _PRIMITIVE_MAP for literal in intermediate.PrimitiveType)
+
 
 def _generate_aliases(
         symbol_table: intermediate.SymbolTable,
@@ -22,9 +31,16 @@ def _generate_aliases(
     """Generate the aliases including the primitive values."""
     aliases = ET.Element("Aliases")
 
-    alias_boolean = ET.Element("Alias", {"Alias": "Boolean"})
-    alias_boolean.text = "i=1"
-    aliases.append(alias_boolean)
+    for name, i in (
+            ("Boolean", 1),
+            ("Int64", 8),
+            ("Double", 11),
+            ("String", 12),
+            ("ByteString", 15)
+    ):
+        alias = ET.Element("Alias", {"Alias": name})
+        alias.text = f"i={i}"
+        aliases.append(alias)
 
     # TODO (mristin, 2024-11-04): add more primitive values
 
