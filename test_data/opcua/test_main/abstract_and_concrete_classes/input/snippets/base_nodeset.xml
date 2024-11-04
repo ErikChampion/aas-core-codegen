@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UANodeSet
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+        xmlns="http://opcfoundation.org/UA/2011/03/UANodeSet.xsd"
+>
+    <NamespaceUris>
+        <Uri>http://opcfoundation.org/UA/I4AAS/</Uri>
+    </NamespaceUris>
+    <Models>
+        <Model ModelUri="http://opcfoundation.org/UA/I4AAS/" Version="5.0.0"
+               PublicationDate="2021-06-04T00:00:00Z">
+            <RequiredModel ModelUri="http://opcfoundation.org/UA/" Version="1.04.3"
+                           PublicationDate="2019-09-09T00:00:00Z"/>
+        </Model>
+    </Models>
+</UANodeSet>
