@@ -1,6 +1,7 @@
 """Generate the OPC UA Schema node set corresponding to the meta-model."""
 import collections
 import io
+import itertools
 from typing import TextIO, Tuple, Optional, List, MutableMapping, Mapping
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
@@ -9,7 +10,7 @@ from icontract import ensure
 
 import aas_core_codegen.opcua
 from aas_core_codegen import run, intermediate, specific_implementations
-from aas_core_codegen.common import Stripped, Error
+from aas_core_codegen.common import Stripped, Error, assert_never
 import aas_core_codegen.opcua.naming as opcua_naming
 
 assert aas_core_codegen.opcua.__doc__ == __doc__
@@ -24,9 +25,22 @@ _PRIMITIVE_MAP = {
 assert all(literal in _PRIMITIVE_MAP for literal in intermediate.PrimitiveType)
 
 
+class IdentifierMachine:
+    """Produce novel identifiers."""
+
+    def __init__(self) -> None:
+        self._next_identifier = 5000
+
+    def next(self) -> int:
+        """Return the current identifier, and increment for the next one."""
+        result = self._next_identifier
+        self._next_identifier += 1
+        return result
+
+
 def _generate_aliases(
         symbol_table: intermediate.SymbolTable,
-        class_to_identifier: Mapping[intermediate.Class, int]
+        our_type_to_identifier: Mapping[intermediate.OurType, int]
 ) -> ET.Element:
     """Generate the aliases including the primitive values."""
     aliases = ET.Element("Aliases")
@@ -42,15 +56,116 @@ def _generate_aliases(
         alias.text = f"i={i}"
         aliases.append(alias)
 
-    # TODO (mristin, 2024-11-04): add more primitive values
-
-    for cls in symbol_table.classes:
-        alias = ET.Element("Alias", {"Alias": opcua_naming.data_type_name(cls.name)})
-        alias.text = f"ns=1;i={class_to_identifier[cls]}"
+    for our_type in itertools.chain(
+            symbol_table.enumerations,
+            symbol_table.classes
+    ):
+        alias = ET.Element("Alias",
+                           {"Alias": opcua_naming.data_type_name(our_type.name)})
+        alias.text = f"ns=1;i={our_type_to_identifier[our_type]}"
 
         aliases.append(alias)
 
     return aliases
+
+
+def _generate_for_enum(
+        enum: intermediate.Enumeration,
+        our_type_to_identifier: Mapping[intermediate.OurType, int]
+) -> ET.Element:
+    """Define a data type for the enumeration."""
+    data_type_name = opcua_naming.data_type_name(enum.name)
+
+    root = ET.Element(
+        "UADataType",
+        collections.OrderedDict(
+            [
+                ("NodeId", f"ns=1;i={our_type_to_identifier[enum]}"),
+                ("BrowseName", f"1:{data_type_name}")
+            ]
+        )
+    )
+
+    # TODO (mristin, 2024-11-04): add DisplayName, References etc.
+
+    definition = ET.Element("Definition")
+    root.append(definition)
+
+    for literal in enum.literals:
+        field = ET.Element(
+            "Field",
+            collections.OrderedDict(
+                [
+                    ("Name", opcua_naming.enum_literal_name(literal.name)),
+                    ("Value", literal.value)
+                ]
+            )
+        )
+
+        definition.append(field)
+
+    return root
+
+
+def _generate_definition(
+        cls: intermediate.ClassUnion,
+        our_type_to_identifier: Mapping[intermediate.OurType, int],
+        identifier_machine: IdentifierMachine
+) -> List[ET.Element]:
+    """Generate the definition for the given class."""
+    result = []  # type: List[ET.Element]
+
+    if isinstance(cls, intermediate.ConcreteClass):
+        # TODO (mristin, 2024-11-04): implement
+        pass
+    elif isinstance(cls, intermediate.AbstractClass):
+        # TODO (mristin, 2024-11-04): implement
+        pass
+    else:
+        assert_never(cls)
+
+    for prop in cls.properties:
+        prop.type_annotation
+
+        type_anno = intermediate.beneath_optional(prop.type_annotation)
+
+        maybe_primitive_type = intermediate.try_primitive_type(type_anno)
+
+        if isinstance(type_anno, intermediate.PrimitiveTypeAnnotation):
+            # TODO: implement
+            raise NotImplementedError()
+        elif isinstance(type_anno, intermediate.OurTypeAnnotation):
+            if isinstance(type_anno.our_type, intermediate.Enumeration):
+                # TODO: implement
+                raise NotImplementedError()
+            elif isinstance(type_anno.our_type, intermediate.ConstrainedPrimitive):
+                # TODO: implement
+                raise NotImplementedError()
+            elif isinstance(
+                    type_anno.our_type,
+                    (intermediate.AbstractClass, intermediate.ConcreteClass)
+            ):
+                # TODO: implement
+                raise NotImplementedError()
+            else:
+                assert_never(type_anno.our_type)
+        elif isinstance(type_anno, intermediate.ListTypeAnnotation):
+            assert (
+                    isinstance(type_anno.items, intermediate.OurTypeAnnotation)
+                    and isinstance(
+                type_anno.items.our_type,
+                (intermediate.AbstractClass, intermediate.ConcreteClass)
+            )
+            ), (
+                f"NOTE (ErikChampion): We expect only lists of classes "
+                f"at the moment, but you specified {type_anno}. "
+                f"Please contact the developers if you need this feature."
+            )
+
+            # TODO: implement
+            raise NotImplementedError()
+        else:
+            assert_never(type_anno)
 
 
 @ensure(lambda result: not (result[1] is not None) or (len(result[1]) >= 1))
@@ -85,17 +200,40 @@ def _generate(
             )
         ]
 
-    class_to_identifier = collections.OrderedDict(
-    )  # type: MutableMapping[intermediate.Class, int]
-    for i, cls in enumerate(symbol_table.classes):
-        class_to_identifier[cls] = 5000 + i
+    identifier_machine = IdentifierMachine()
+
+    our_type_to_identifier = collections.OrderedDict(
+    )  # type: MutableMapping[intermediate.OurType, int]
+    for i, our_type in enumerate(
+            itertools.chain(
+                symbol_table.enumerations,
+                symbol_table.classes,
+            )
+    ):
+        our_type_to_identifier[our_type] = identifier_machine.next()
 
     aliases = _generate_aliases(
         symbol_table=symbol_table,
-        class_to_identifier=class_to_identifier
+        our_type_to_identifier=our_type_to_identifier
     )
 
     root.append(aliases)
+
+    for enum in symbol_table.enumerations:
+        root.append(
+            _generate_for_enum(
+                enum=enum,
+                our_type_to_identifier=our_type_to_identifier
+            )
+        )
+
+    for cls in symbol_table.concrete_classes:
+        root.extend(
+            _generate_definition(
+            cls=cls,
+                                         our_type_to_identifier=our_type_to_identifier,
+            identifier_machine=identifier_machine)
+        )
 
     text = ET.tostring(root, encoding="unicode", method="xml")
 
