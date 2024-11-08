@@ -14,22 +14,17 @@
     <Alias Alias="Double">i=11</Alias>
     <Alias Alias="String">i=12</Alias>
     <Alias Alias="ByteString">i=15</Alias>
-    <Alias Alias="ModellingKindDataType">ns=1;i=5000</Alias>
+    <Alias Alias="ItemDataType">ns=1;i=5000</Alias>
     <Alias Alias="SomethingDataType">ns=1;i=5001</Alias>
   </Aliases>
-  <UADataType NodeId="ns=1;i=5000" BrowseName="1:ModellingKindDataType">
-    <DisplayName>ModellingKindDataType</DisplayName>
-    <Description>Enumeration for ModellingKindDataType</Description>
+  <UADataType NodeId="ns=1;i=5000" BrowseName="1:ItemDataType">
+    <DisplayName>ItemDataType</DisplayName>
+    <Description>DataType for ItemDataType</Description>
     <References>
-      <Reference ReferenceType="HasSubtype" IsForward="false">i=29</Reference>
+      <Reference ReferenceType="HasSubtype" IsForward="false">i=22</Reference>
     </References>
-    <Definition Name="ModellingKindDataType" IsUnion="false">
-      <Field Name="Template" Value="0">
-        <DisplayName>Template</DisplayName>
-      </Field>
-      <Field Name="Instance" Value="1">
-        <DisplayName>Instance</DisplayName>
-      </Field>
+    <Definition Name="ItemDataType" IsUnion="false">
+      <Field Name="some_str" DataType="String"/>
     </Definition>
   </UADataType>
   <UADataType NodeId="ns=1;i=5001" BrowseName="1:SomethingDataType">
@@ -39,8 +34,8 @@
       <Reference ReferenceType="HasSubtype" IsForward="false">i=22</Reference>
     </References>
     <Definition Name="SomethingDataType" IsUnion="false">
-      <Field Name="modelling_kind" DataType="ModellingKindDataType"/>
-      <Field Name="optional_modelling_kind" DataType="ModellingKindDataType"/>
+      <Field Name="items" DataType="ItemDataType" ValueRank="1"/>
+      <Field Name="optional_items" DataType="ItemDataType" ValueRank="1"/>
     </Definition>
   </UADataType>
 </UANodeSet>

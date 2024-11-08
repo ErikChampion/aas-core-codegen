@@ -57,17 +57,16 @@ def _generate_aliases(
         alias.text = f"i={i}"
         aliases.append(alias)
 
-    for our_type in itertools.chain(
-            symbol_table.enumerations,
-            symbol_table.classes
-    ):
-        alias = ET.Element("Alias",
-                           {"Alias": opcua_naming.data_type_name(our_type.name)})
+    for our_type in our_type_to_identifier:
+        alias = ET.Element(
+            "Alias",
+            {"Alias": opcua_naming.data_type_name(our_type.name)}
+        )
         alias.text = f"ns=1;i={our_type_to_identifier[our_type]}"
-
         aliases.append(alias)
 
     return aliases
+
 
 def indent(elem, level=0):
     i = "\n" + level*"  "
@@ -84,6 +83,7 @@ def indent(elem, level=0):
         if level and (not elem.tail or not elem.tail.strip()):
             elem.tail = i
 
+
 def _generate_for_enum(
     enum: intermediate.Enumeration,
     our_type_to_identifier: Mapping[intermediate.OurType, int],
@@ -93,35 +93,42 @@ def _generate_for_enum(
 
     root = ET.Element(
         "UADataType",
-        collections.OrderedDict(
-            [
-                ("NodeId", f"ns=1;i={our_type_to_identifier[enum]}"),
-                ("BrowseName", f"1:{data_type_name}"),
-            ]
-        ),
+        {
+            "NodeId": f"ns=1;i={our_type_to_identifier[enum]}",
+            "BrowseName": f"1:{data_type_name}",
+        },
     )
 
-    # Adding DisplayName and Description
+    # Add DisplayName and Description
     display_name = ET.SubElement(root, "DisplayName")
     display_name.text = data_type_name
 
     description = ET.SubElement(root, "Description")
     description.text = f"Enumeration for {data_type_name}"
 
-    # Adding Definition with fields
+    # References (inheritance)
+    references = ET.SubElement(root, "References")
+    has_subtype = ET.SubElement(
+        references,
+        "Reference",
+        {"ReferenceType": "HasSubtype", "IsForward": "false"},
+    )
+    has_subtype.text = "i=29"  # Enumeration is a subtype of Enumeration data type
+
+    # Add Definition with fields
     definition = ET.SubElement(
         root,
         "Definition",
         {"Name": data_type_name, "IsUnion": "false"},
     )
 
-    for literal in enum.literals:
+    for idx, literal in enumerate(enum.literals):
         field = ET.SubElement(
             definition,
             "Field",
             {
                 "Name": opcua_naming.enum_literal_name(literal.name),
-                "Value": str(literal.value),
+                "Value": str(idx),
             },
         )
         # Optionally add DisplayName for each field
@@ -130,6 +137,180 @@ def _generate_for_enum(
 
     return root
 
+
+# V1
+# def _generate_definition(
+#     cls: intermediate.ClassUnion,
+#     our_type_to_identifier: Mapping[intermediate.OurType, int],
+#     identifier_machine: IdentifierMachine,
+# ) -> List[ET.Element]:
+#     """Generate the definition for the given class."""
+#     result = []
+#
+#     data_type_name = opcua_naming.data_type_name(cls.name)
+#
+#     # Create UADataType element
+#     data_type = ET.Element(
+#         "UADataType",
+#         {
+#             "NodeId": f"ns=1;i={our_type_to_identifier[cls]}",
+#             "BrowseName": f"1:{data_type_name}",
+#         },
+#     )
+#
+#     # Add DisplayName and Description
+#     display_name = ET.SubElement(data_type, "DisplayName")
+#     display_name.text = data_type_name
+#
+#     description = ET.SubElement(data_type, "Description")
+#     description.text = f"DataType for {data_type_name}"
+#
+#     # References (inheritance)
+#     references = ET.SubElement(data_type, "References")
+#     has_subtype = ET.SubElement(
+#         references,
+#         "Reference",
+#         {"ReferenceType": "HasSubtype", "IsForward": "false"},
+#     )
+#     has_subtype.text = "i=22"  # BaseDataType
+#
+#     # Add Definition
+#     definition = ET.SubElement(
+#         data_type,
+#         "Definition",
+#         {"Name": data_type_name, "IsUnion": "false"},
+#     )
+#
+#     # Add Fields for each property
+#     for prop in cls.properties:
+#         field = ET.SubElement(definition, "Field", {"Name": prop.name})
+#
+#         # Determine the data type of the field
+#         type_anno = intermediate.beneath_optional(prop.type_annotation)
+#         if isinstance(type_anno, intermediate.ListTypeAnnotation):
+#             item_type = intermediate.beneath_optional(type_anno.items)
+#             if isinstance(item_type, intermediate.PrimitiveTypeAnnotation):
+#                 # Handle lists of primitive types
+#                 primitive_type = _PRIMITIVE_MAP[item_type.a_type]
+#                 field.set("DataType", primitive_type)
+#                 field.set("ValueRank", "1")  # Indicates an array
+#             elif isinstance(item_type, intermediate.OurTypeAnnotation):
+#                 # Handle lists of classes
+#                 item_data_type = opcua_naming.data_type_name(item_type.our_type.name)
+#                 field.set("DataType", item_data_type)
+#                 field.set("ValueRank", "1")  # Indicates an array
+#             else:
+#                 raise NotImplementedError(f"Unsupported list item type: {item_type}")
+#         elif isinstance(type_anno, intermediate.PrimitiveTypeAnnotation):
+#             primitive_type = _PRIMITIVE_MAP[type_anno.a_type]
+#             field.set("DataType", primitive_type)
+#         elif isinstance(type_anno, intermediate.OurTypeAnnotation):
+#             # Handle class types
+#             field.set(
+#                 "DataType",
+#                 opcua_naming.data_type_name(type_anno.our_type.name),
+#             )
+#         else:
+#             raise NotImplementedError(f"Unsupported type annotation: {type_anno}")
+#
+#         # Handle optional fields
+#         if intermediate.is_optional(prop.type_annotation):
+#             field.set("IsOptional", "true")
+#         else:
+#             field.set("IsOptional", "false")
+#
+#     result.append(data_type)
+#     return result
+
+# V2
+#
+# def _generate_definition(
+#     cls: intermediate.ClassUnion,
+#     our_type_to_identifier: Mapping[intermediate.OurType, int],
+#     identifier_machine: IdentifierMachine,
+# ) -> List[ET.Element]:
+#     """Generate the definition for the given class."""
+#     result = []
+#
+#     data_type_name = opcua_naming.data_type_name(cls.name)
+#
+#     # Create UADataType element
+#     data_type = ET.Element(
+#         "UADataType",
+#         {
+#             "NodeId": f"ns=1;i={our_type_to_identifier[cls]}",
+#             "BrowseName": f"1:{data_type_name}",
+#         },
+#     )
+#
+#     # Add DisplayName and Description
+#     display_name = ET.SubElement(data_type, "DisplayName")
+#     display_name.text = data_type_name
+#
+#     description = ET.SubElement(data_type, "Description")
+#     description.text = f"DataType for {data_type_name}"
+#
+#     # References (inheritance)
+#     references = ET.SubElement(data_type, "References")
+#     has_subtype = ET.SubElement(
+#         references,
+#         "Reference",
+#         {"ReferenceType": "HasSubtype", "IsForward": "false"},
+#     )
+#     has_subtype.text = "i=22"  # BaseDataType
+#
+#     # Add Definition
+#     definition = ET.SubElement(
+#         data_type,
+#         "Definition",
+#         {"Name": data_type_name,
+#          "IsUnion": "false"     # free to comment out.
+#          },
+#     )
+#
+#     # Add Fields for each property
+#     for prop in cls.properties:
+#         field = ET.SubElement(definition, "Field", {"Name": prop.name})
+#
+#         # Determine the data type of the field
+#         type_anno = intermediate.beneath_optional(prop.type_annotation)
+#         if isinstance(type_anno, intermediate.ListTypeAnnotation):
+#             item_type = intermediate.beneath_optional(type_anno.items)
+#             if isinstance(item_type, intermediate.PrimitiveTypeAnnotation):
+#                 # Handle lists of primitive types
+#                 primitive_type = _PRIMITIVE_MAP[item_type.a_type]
+#                 field.set("DataType", primitive_type)
+#                 field.set("ValueRank", "1")  # Indicates an array
+#             elif isinstance(item_type, intermediate.OurTypeAnnotation):
+#                 # Handle lists of classes
+#                 item_data_type = opcua_naming.data_type_name(item_type.our_type.name)
+#                 field.set("DataType", item_data_type)
+#                 field.set("ValueRank", "1")  # Indicates an array
+#             else:
+#                 raise NotImplementedError(f"Unsupported list item type: {item_type}")
+#         elif isinstance(type_anno, intermediate.PrimitiveTypeAnnotation):
+#             primitive_type = _PRIMITIVE_MAP[type_anno.a_type]
+#             field.set("DataType", primitive_type)
+#         elif isinstance(type_anno, intermediate.OurTypeAnnotation):
+#             # Handle class types
+#             field.set(
+#                 "DataType",
+#                 opcua_naming.data_type_name(type_anno.our_type.name),
+#             )
+#         else:
+#             raise NotImplementedError(f"Unsupported type annotation: {type_anno}")
+#
+#         # Handle optional fields
+#         # if intermediate.is_optional(prop.type_annotation):
+#         #     field.set("IsOptional", "true")
+#         # else:
+#         #     field.set("IsOptional", "false")
+#
+#     result.append(data_type)
+#     return result
+
+
+#V3
 
 def _generate_definition(
     cls: intermediate.ClassUnion,
@@ -184,22 +365,33 @@ def _generate_definition(
             field.set("DataType", primitive_type)
         elif isinstance(type_anno, intermediate.OurTypeAnnotation):
             if isinstance(type_anno.our_type, intermediate.Enumeration):
-                field.set(
-                    "DataType",
-                    opcua_naming.data_type_name(type_anno.our_type.name),
-                )
+                # Handle enum types
+                enum_data_type = opcua_naming.data_type_name(type_anno.our_type.name)
+                field.set("DataType", enum_data_type)
             elif isinstance(
                 type_anno.our_type, (intermediate.AbstractClass, intermediate.ConcreteClass)
             ):
+                # Handle class types
                 field.set(
                     "DataType",
                     opcua_naming.data_type_name(type_anno.our_type.name),
                 )
             else:
-                # Handle other cases if necessary
                 raise NotImplementedError(
                     f"Unsupported type: {type_anno.our_type}"
                 )
+        elif isinstance(type_anno, intermediate.ListTypeAnnotation):
+            item_type = intermediate.beneath_optional(type_anno.items)
+            if isinstance(item_type, intermediate.PrimitiveTypeAnnotation):
+                primitive_type = _PRIMITIVE_MAP[item_type.a_type]
+                field.set("DataType", primitive_type)
+                field.set("ValueRank", "1")  # Indicates an array
+            elif isinstance(item_type, intermediate.OurTypeAnnotation):
+                item_data_type = opcua_naming.data_type_name(item_type.our_type.name)
+                field.set("DataType", item_data_type)
+                field.set("ValueRank", "1")  # Indicates an array
+            else:
+                raise NotImplementedError(f"Unsupported list item type: {item_type}")
         else:
             raise NotImplementedError(f"Unsupported type annotation: {type_anno}")
 
@@ -211,6 +403,8 @@ def _generate_definition(
 
     result.append(data_type)
     return result
+
+
 
 
 
