@@ -2,6 +2,7 @@
 from aas_core_codegen.common import Identifier
 from aas_core_codegen import naming
 
+
 def data_type_name(identifier: Identifier)->Identifier:
     """
     Generate the data type name in OPC UA corresponding to the given identifier.

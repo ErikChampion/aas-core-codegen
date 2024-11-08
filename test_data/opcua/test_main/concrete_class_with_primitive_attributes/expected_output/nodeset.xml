@@ -1,20 +1,38 @@
-<ns0:UANodeSet xmlns:ns0="http://opcfoundation.org/UA/2011/03/UANodeSet.xsd">
-    <ns0:NamespaceUris>
-        <ns0:Uri>http://opcfoundation.org/UA/I4AAS/</ns0:Uri>
-    </ns0:NamespaceUris>
-    <ns0:Models>
-        <ns0:Model ModelUri="http://opcfoundation.org/UA/I4AAS/" Version="5.0.0"
-                   PublicationDate="2021-06-04T00:00:00Z">
-            <ns0:RequiredModel ModelUri="http://opcfoundation.org/UA/" Version="1.04.3"
-                               PublicationDate="2019-09-09T00:00:00Z"/>
-        </ns0:Model>
-    </ns0:Models>
-    <Aliases>
-        <Alias Alias="Boolean">i=1</Alias>
-        <Alias Alias="Int64">i=8</Alias>
-        <Alias Alias="Double">i=11</Alias>
-        <Alias Alias="String">i=12</Alias>
-        <Alias Alias="ByteString">i=15</Alias>
-        <Alias Alias="SomethingDataType">ns=1;i=5000</Alias>
-    </Aliases>
-</ns0:UANodeSet>
+<?xml version="1.0" ?>
+<UANodeSet xmlns="http://opcfoundation.org/UA/2011/03/UANodeSet.xsd">
+  <NamespaceUris>
+    <Uri>https://dummy/198/4</Uri>
+  </NamespaceUris>
+  <Models>
+    <Model ModelUri="https://dummy/198/4" Version="V198.4" PublicationDate="2023-10-10T00:00:00Z">
+      <RequiredModel ModelUri="http://opcfoundation.org/UA/" Version="1.04.3" PublicationDate="2019-09-09T00:00:00Z"/>
+    </Model>
+  </Models>
+  <Aliases>
+    <Alias Alias="Boolean">i=1</Alias>
+    <Alias Alias="Int64">i=8</Alias>
+    <Alias Alias="Double">i=11</Alias>
+    <Alias Alias="String">i=12</Alias>
+    <Alias Alias="ByteString">i=15</Alias>
+    <Alias Alias="SomethingDataType">ns=1;i=5000</Alias>
+  </Aliases>
+  <UADataType NodeId="ns=1;i=5000" BrowseName="1:SomethingDataType">
+    <DisplayName>SomethingDataType</DisplayName>
+    <Description>DataType for SomethingDataType</Description>
+    <References>
+      <Reference ReferenceType="HasSubtype" IsForward="false">i=22</Reference>
+    </References>
+    <Definition Name="SomethingDataType" IsUnion="false">
+      <Field Name="some_bool" DataType="Boolean"/>
+      <Field Name="some_int" DataType="Int64"/>
+      <Field Name="some_float" DataType="Double"/>
+      <Field Name="some_str" DataType="String"/>
+      <Field Name="some_byte_array" DataType="ByteString"/>
+      <Field Name="some_optional_bool" DataType="Boolean"/>
+      <Field Name="some_optional_int" DataType="Int64"/>
+      <Field Name="some_optional_float" DataType="Double"/>
+      <Field Name="some_optional_str" DataType="String"/>
+      <Field Name="some_optional_byte_array" DataType="ByteString"/>
+    </Definition>
+  </UADataType>
+</UANodeSet>
