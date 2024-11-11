@@ -137,6 +137,227 @@ def _generate_for_enum(
 
     return root
 
+#V3
+
+def _generate_definition(
+    cls: intermediate.ClassUnion,
+    our_type_to_identifier: Mapping[intermediate.OurType, int],
+    identifier_machine: IdentifierMachine,
+) -> List[ET.Element]:
+    """Generate the definition for the given class."""
+    result = []
+
+    data_type_name = opcua_naming.data_type_name(cls.name)
+
+    # Create UADataType element
+    data_type = ET.Element(
+        "UADataType",
+        {
+            "NodeId": f"ns=1;i={our_type_to_identifier[cls]}",
+            "BrowseName": f"1:{data_type_name}",
+        },
+    )
+
+    # Add DisplayName and Description
+    display_name = ET.SubElement(data_type, "DisplayName")
+    display_name.text = data_type_name
+
+    description = ET.SubElement(data_type, "Description")
+    description.text = f"DataType for {data_type_name}"
+
+    # References (inheritance)
+    references = ET.SubElement(data_type, "References")
+    has_subtype = ET.SubElement(
+        references,
+        "Reference",
+        {"ReferenceType": "HasSubtype", "IsForward": "false"},
+    )
+    has_subtype.text = "i=22"  # BaseDataType
+
+    # Add Definition
+    definition = ET.SubElement(
+        data_type,
+        "Definition",
+        {"Name": data_type_name},
+    )
+
+    # Add Fields for each property
+    for prop in cls.properties:
+        field = ET.SubElement(definition, "Field", {"Name": prop.name})
+
+        # Determine the data type of the field
+        type_anno = intermediate.beneath_optional(prop.type_annotation)
+        if isinstance(type_anno, intermediate.PrimitiveTypeAnnotation):
+            primitive_type = _PRIMITIVE_MAP[type_anno.a_type]
+            field.set("DataType", primitive_type)
+        elif isinstance(type_anno, intermediate.OurTypeAnnotation):
+            if isinstance(type_anno.our_type, intermediate.Enumeration):
+                # Handle enum types
+                enum_data_type = opcua_naming.data_type_name(type_anno.our_type.name)
+                field.set("DataType", enum_data_type)
+            elif isinstance(
+                type_anno.our_type, (intermediate.AbstractClass, intermediate.ConcreteClass)
+            ):
+                # Handle class types
+                field.set(
+                    "DataType",
+                    opcua_naming.data_type_name(type_anno.our_type.name),
+                )
+            else:
+                raise NotImplementedError(
+                    f"Unsupported type: {type_anno.our_type}"
+                )
+        elif isinstance(type_anno, intermediate.ListTypeAnnotation):
+            item_type = intermediate.beneath_optional(type_anno.items)
+            if isinstance(item_type, intermediate.PrimitiveTypeAnnotation):
+                primitive_type = _PRIMITIVE_MAP[item_type.a_type]
+                field.set("DataType", primitive_type)
+                field.set("ValueRank", "1")  # Indicates an array
+            elif isinstance(item_type, intermediate.OurTypeAnnotation):
+                item_data_type = opcua_naming.data_type_name(item_type.our_type.name)
+                field.set("DataType", item_data_type)
+                field.set("ValueRank", "1")  # Indicates an array
+            else:
+                raise NotImplementedError(f"Unsupported list item type: {item_type}")
+        else:
+            raise NotImplementedError(f"Unsupported type annotation: {type_anno}")
+
+    result.append(data_type)
+    return result
+
+
+
+
+
+@ensure(lambda result: not (result[1] is not None) or (len(result[1]) >= 1))
+@ensure(lambda result: (result[0] is not None) ^ (result[1] is not None))
+def _generate(
+        symbol_table: intermediate.SymbolTable,
+        spec_impls: specific_implementations.SpecificImplementations,
+) -> Tuple[Optional[str], Optional[List[Error]]]:
+    """Generate tne node set according to the symbol table."""
+    # Before 2
+    # After:
+
+    OPCUA_NS = "http://opcfoundation.org/UA/2011/03/UANodeSet.xsd"
+    ET.register_namespace('', OPCUA_NS)
+
+    root = ET.Element('{%s}UANodeSet' % OPCUA_NS)
+
+    namespace_uris = ET.SubElement(root, '{%s}NamespaceUris' % OPCUA_NS)
+    uri_elem = ET.SubElement(namespace_uris, '{%s}Uri' % OPCUA_NS)
+    uri_elem.text = 'https://dummy/198/4'  # Use your actual namespace URI
+
+    models = ET.SubElement(root, '{%s}Models' % OPCUA_NS)
+    model = ET.SubElement(models, '{%s}Model' % OPCUA_NS, {
+        'ModelUri': 'https://dummy/198/4',  # Use your actual ModelUri
+        'Version': 'V198.4',  # Use your actual version
+        'PublicationDate': '2023-10-10T00:00:00Z'  # Use the correct date
+    })
+    required_model = ET.SubElement(model, '{%s}RequiredModel' % OPCUA_NS, {
+        'ModelUri': 'http://opcfoundation.org/UA/',
+        'Version': '1.04.3',
+        'PublicationDate': '2019-09-09T00:00:00Z'
+    })
+
+    identifier_machine = IdentifierMachine()
+
+    our_type_to_identifier = collections.OrderedDict(
+    )  # type: MutableMapping[intermediate.OurType, int]
+    for i, our_type in enumerate(
+            itertools.chain(
+                symbol_table.enumerations,
+                symbol_table.classes,
+            )
+    ):
+        our_type_to_identifier[our_type] = identifier_machine.next()
+
+    aliases = _generate_aliases(
+        symbol_table=symbol_table,
+        our_type_to_identifier=our_type_to_identifier
+    )
+
+    root.append(aliases)
+
+    for enum in symbol_table.enumerations:
+        root.append(
+            _generate_for_enum(
+                enum=enum,
+                our_type_to_identifier=our_type_to_identifier
+            )
+        )
+
+    # 3
+
+    # Generate definitions for classes
+    for cls in symbol_table.classes:
+        data_type_elements = _generate_definition(
+            cls=cls,
+            our_type_to_identifier=our_type_to_identifier,
+            identifier_machine=identifier_machine,
+        )
+        root.extend(data_type_elements)
+
+    # Indent for pretty-printing
+    indent(root)
+
+    # Convert to string
+    xml_str = ET.tostring(root, encoding='utf-8')
+
+    # Pretty-print
+    dom = xml.dom.minidom.parseString(xml_str)
+    pretty_xml_as_string = dom.toprettyxml(indent="  ")
+
+    # Remove extra blank lines if necessary
+    pretty_xml_as_string = '\n'.join([line for line in pretty_xml_as_string.split('\n') if line.strip()])
+
+    return pretty_xml_as_string, None
+
+
+def execute(
+        context: run.Context,
+        stdout: TextIO,
+        stderr: TextIO,
+) -> int:
+    """
+    Execute the generation with the given parameters.
+
+    Return the error code, or 0 if no errors.
+    """
+    code, errors = _generate(
+        symbol_table=context.symbol_table,
+        spec_impls=context.spec_impls
+    )
+    if errors is not None:
+        run.write_error_report(
+            message=f"Failed to generate the OPC UA node set "
+                    f"based on {context.model_path}",
+            errors=[context.lineno_columner.error_message(error) for error in errors],
+            stderr=stderr,
+        )
+        return 1
+
+    assert code is not None
+
+    # noinspection SpellCheckingInspection
+    pth = context.output_dir / "nodeset.xml"
+    try:
+        pth.write_text(code, encoding="utf-8")
+    except Exception as exception:
+        run.write_error_report(
+            message=f"Failed to write the OPC UA node set to {pth}",
+            errors=[str(exception)],
+            stderr=stderr,
+        )
+        return 1
+
+    stdout.write(f"Code generated to: {context.output_dir}\n")
+
+    return 0
+
+
+# 1
+
 
 # V1
 # def _generate_definition(
@@ -310,112 +531,9 @@ def _generate_for_enum(
 #     return result
 
 
-#V3
+# 2
 
-def _generate_definition(
-    cls: intermediate.ClassUnion,
-    our_type_to_identifier: Mapping[intermediate.OurType, int],
-    identifier_machine: IdentifierMachine,
-) -> List[ET.Element]:
-    """Generate the definition for the given class."""
-    result = []
-
-    data_type_name = opcua_naming.data_type_name(cls.name)
-
-    # Create UADataType element
-    data_type = ET.Element(
-        "UADataType",
-        {
-            "NodeId": f"ns=1;i={our_type_to_identifier[cls]}",
-            "BrowseName": f"1:{data_type_name}",
-        },
-    )
-
-    # Add DisplayName and Description
-    display_name = ET.SubElement(data_type, "DisplayName")
-    display_name.text = data_type_name
-
-    description = ET.SubElement(data_type, "Description")
-    description.text = f"DataType for {data_type_name}"
-
-    # References (inheritance)
-    references = ET.SubElement(data_type, "References")
-    has_subtype = ET.SubElement(
-        references,
-        "Reference",
-        {"ReferenceType": "HasSubtype", "IsForward": "false"},
-    )
-    has_subtype.text = "i=22"  # BaseDataType
-
-    # Add Definition
-    definition = ET.SubElement(
-        data_type,
-        "Definition",
-        {"Name": data_type_name, "IsUnion": "false"},
-    )
-
-    # Add Fields for each property
-    for prop in cls.properties:
-        field = ET.SubElement(definition, "Field", {"Name": prop.name})
-
-        # Determine the data type of the field
-        type_anno = intermediate.beneath_optional(prop.type_annotation)
-        if isinstance(type_anno, intermediate.PrimitiveTypeAnnotation):
-            primitive_type = _PRIMITIVE_MAP[type_anno.a_type]
-            field.set("DataType", primitive_type)
-        elif isinstance(type_anno, intermediate.OurTypeAnnotation):
-            if isinstance(type_anno.our_type, intermediate.Enumeration):
-                # Handle enum types
-                enum_data_type = opcua_naming.data_type_name(type_anno.our_type.name)
-                field.set("DataType", enum_data_type)
-            elif isinstance(
-                type_anno.our_type, (intermediate.AbstractClass, intermediate.ConcreteClass)
-            ):
-                # Handle class types
-                field.set(
-                    "DataType",
-                    opcua_naming.data_type_name(type_anno.our_type.name),
-                )
-            else:
-                raise NotImplementedError(
-                    f"Unsupported type: {type_anno.our_type}"
-                )
-        elif isinstance(type_anno, intermediate.ListTypeAnnotation):
-            item_type = intermediate.beneath_optional(type_anno.items)
-            if isinstance(item_type, intermediate.PrimitiveTypeAnnotation):
-                primitive_type = _PRIMITIVE_MAP[item_type.a_type]
-                field.set("DataType", primitive_type)
-                field.set("ValueRank", "1")  # Indicates an array
-            elif isinstance(item_type, intermediate.OurTypeAnnotation):
-                item_data_type = opcua_naming.data_type_name(item_type.our_type.name)
-                field.set("DataType", item_data_type)
-                field.set("ValueRank", "1")  # Indicates an array
-            else:
-                raise NotImplementedError(f"Unsupported list item type: {item_type}")
-        else:
-            raise NotImplementedError(f"Unsupported type annotation: {type_anno}")
-
-        # Handle optional fields
-        # if intermediate.is_optional(prop.type_annotation):
-        #     field.set("IsOptional", "true")
-        # else:
-        #     field.set("IsOptional", "false")
-
-    result.append(data_type)
-    return result
-
-
-
-
-
-@ensure(lambda result: not (result[1] is not None) or (len(result[1]) >= 1))
-@ensure(lambda result: (result[0] is not None) ^ (result[1] is not None))
-def _generate(
-        symbol_table: intermediate.SymbolTable,
-        spec_impls: specific_implementations.SpecificImplementations,
-) -> Tuple[Optional[str], Optional[List[Error]]]:
-    """Generate tne node set according to the symbol table."""
-    #Before:
+# Before:
     # base_nodeset_key = specific_implementations.ImplementationKey(
     #     "base_nodeset.xml"
     # )
@@ -441,55 +559,9 @@ def _generate(
     #         )
     #     ]
 
-    # After:
 
-    OPCUA_NS = "http://opcfoundation.org/UA/2011/03/UANodeSet.xsd"
-    ET.register_namespace('', OPCUA_NS)
+# 3
 
-    root = ET.Element('{%s}UANodeSet' % OPCUA_NS)
-
-    namespace_uris = ET.SubElement(root, '{%s}NamespaceUris' % OPCUA_NS)
-    uri_elem = ET.SubElement(namespace_uris, '{%s}Uri' % OPCUA_NS)
-    uri_elem.text = 'https://dummy/198/4'  # Use your actual namespace URI
-
-    models = ET.SubElement(root, '{%s}Models' % OPCUA_NS)
-    model = ET.SubElement(models, '{%s}Model' % OPCUA_NS, {
-        'ModelUri': 'https://dummy/198/4',  # Use your actual ModelUri
-        'Version': 'V198.4',  # Use your actual version
-        'PublicationDate': '2023-10-10T00:00:00Z'  # Use the correct date
-    })
-    required_model = ET.SubElement(model, '{%s}RequiredModel' % OPCUA_NS, {
-        'ModelUri': 'http://opcfoundation.org/UA/',
-        'Version': '1.04.3',
-        'PublicationDate': '2019-09-09T00:00:00Z'
-    })
-
-    identifier_machine = IdentifierMachine()
-
-    our_type_to_identifier = collections.OrderedDict(
-    )  # type: MutableMapping[intermediate.OurType, int]
-    for i, our_type in enumerate(
-            itertools.chain(
-                symbol_table.enumerations,
-                symbol_table.classes,
-            )
-    ):
-        our_type_to_identifier[our_type] = identifier_machine.next()
-
-    aliases = _generate_aliases(
-        symbol_table=symbol_table,
-        our_type_to_identifier=our_type_to_identifier
-    )
-
-    root.append(aliases)
-
-    for enum in symbol_table.enumerations:
-        root.append(
-            _generate_for_enum(
-                enum=enum,
-                our_type_to_identifier=our_type_to_identifier
-            )
-        )
 
     # for cls in symbol_table.concrete_classes:
     #     root.extend(
@@ -498,79 +570,3 @@ def _generate(
     #         our_type_to_identifier=our_type_to_identifier,
     #         identifier_machine=identifier_machine)
     #     )
-
-    # Generate definitions for classes
-    for cls in symbol_table.classes:
-        data_type_elements = _generate_definition(
-            cls=cls,
-            our_type_to_identifier=our_type_to_identifier,
-            identifier_machine=identifier_machine,
-        )
-        root.extend(data_type_elements)
-
-    # Indent for pretty-printing
-    indent(root)
-
-    # Convert to string
-    xml_str = ET.tostring(root, encoding='utf-8')
-
-    # Pretty-print
-    dom = xml.dom.minidom.parseString(xml_str)
-    pretty_xml_as_string = dom.toprettyxml(indent="  ")
-
-    # Remove extra blank lines if necessary
-    pretty_xml_as_string = '\n'.join([line for line in pretty_xml_as_string.split('\n') if line.strip()])
-
-    return pretty_xml_as_string, None
-
-    # text = ET.tostring(root, encoding="unicode", method="xml")
-    #
-    # # NOTE (mristin):
-    # # This approach is slow, but effective. As long as the meta-model is not too big,
-    # # this should work.
-    # # noinspection PyUnresolvedReferences
-    # pretty_text = xml.dom.minidom.parseString(text).toprettyxml(indent="  ")
-
-    # return text, None
-
-
-def execute(
-        context: run.Context,
-        stdout: TextIO,
-        stderr: TextIO,
-) -> int:
-    """
-    Execute the generation with the given parameters.
-
-    Return the error code, or 0 if no errors.
-    """
-    code, errors = _generate(
-        symbol_table=context.symbol_table,
-        spec_impls=context.spec_impls
-    )
-    if errors is not None:
-        run.write_error_report(
-            message=f"Failed to generate the OPC UA node set "
-                    f"based on {context.model_path}",
-            errors=[context.lineno_columner.error_message(error) for error in errors],
-            stderr=stderr,
-        )
-        return 1
-
-    assert code is not None
-
-    # noinspection SpellCheckingInspection
-    pth = context.output_dir / "nodeset.xml"
-    try:
-        pth.write_text(code, encoding="utf-8")
-    except Exception as exception:
-        run.write_error_report(
-            message=f"Failed to write the OPC UA node set to {pth}",
-            errors=[str(exception)],
-            stderr=stderr,
-        )
-        return 1
-
-    stdout.write(f"Code generated to: {context.output_dir}\n")
-
-    return 0

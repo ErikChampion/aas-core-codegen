@@ -16,7 +16,7 @@ def data_type_name(identifier: Identifier)->Identifier:
     >>> data_type_name(Identifier("Some_URL"))
     'SomeUrlDataType'
     """
-    return Identifier(naming.capitalized_camel_case(identifier) + "DataType")
+    return Identifier("AAS" + naming.capitalized_camel_case(identifier) + "DataType")
 
 def enum_literal_name(identifier: Identifier) -> Identifier:
     """
